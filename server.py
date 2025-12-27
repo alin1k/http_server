@@ -3,24 +3,48 @@ import socket
 HOST = "127.0.0.1"
 PORT = 8080
 
+def make_headers(headers_dict):
+    return  "\n".join([f"{key}: {headers_dict[key]}" for key in headers_dict])
+
+def make_http_response(headers, body, status_code):
+    start_line = f"HTTP/1.1 {status_code}"
+    headers = make_headers(headers)
+    
+    return f"{start_line}\n{headers}\n\n{body}".encode("utf-8")
+
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((HOST,PORT))
     s.listen(1)
-    try:
-        while True:
-            conn, adr = s.accept()
-            with conn:
-                print("Connected by", adr)
-                data = conn.recv(1024)
-                if not data: break
-                print(data.decode("utf-8"))
-                with open("index.html", "r") as file:
+    print(f"Server started on: {HOST}:{PORT}\n\n\n")
+
+    while True:
+        conn, adr = s.accept()
+        with conn:
+            print("Connected by", adr, "\n")
+            data = conn.recv(1024)
+            if not data: 
+                continue
+            
+            data = data.decode("utf-8")
+            print(data)
+
+            req_start_line = data.split("\n")[0].split(" ")
+
+            req_method = req_start_line[0]
+            req_path = req_start_line[1][1:]
+            
+            try:
+                with open(req_path, "r") as file:
                     file_data = file.read()
-                    send_data = "HTTP/1.1 200 OK\nContent-Type: text/html\n\n"
-                    send_data += file_data
-                    conn.sendall(send_data.encode("utf-8"))
-    except Exception as e:
-        print(e)
-        s.close()
+                    headers = {
+                        "Content-Type": "text/html",
+                        "Content-Length": len(file_data)
+                    }   
+                    response = make_http_response(headers, file_data, "200 OK")
+                    conn.sendall(response)
+            except FileNotFoundError:
+                response = make_http_response({}, "Not found", "404 NOT_FOUND")
+                conn.sendall(response)
+
 
