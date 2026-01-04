@@ -7,18 +7,18 @@ PORT = 8080
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def make_headers(headers_dict):
-    return  "\n".join([f"{key}: {headers_dict[key]}" for key in headers_dict])
+    return "".join([f"{key}: {headers_dict[key]}\r\n" for key in headers_dict])
 
 def make_http_response(headers, body, status_code):
     start_line = f"HTTP/1.1 {status_code}"
     headers = make_headers(headers)
     
-    return f"{start_line}\n{headers}\n\n{body}".encode("utf-8")
+    return f"{start_line}\r\n{headers}\r\n".encode("utf-8") + (body if type(body) == bytes else body.encode("utf-8"))
 
 def get_mime_type(file_name):
     type_map = {
         "html": "text/html",
-        "png": "image/png",
+        "png": "image/apng",
         "jpg": "image/jpeg",
         "jpeg": "image/jpeg",
         "css": "text/css",
@@ -60,7 +60,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             file_path = os.path.join(ROOT_DIR, "static", req_path.lstrip("/"))
             
             try:
-                with open(file_path, "r") as file:
+                with open(file_path, "rb") as file:
                     file_data = file.read()
                     mime_type = get_mime_type(file.name)
                     response_date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
