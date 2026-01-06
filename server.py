@@ -1,100 +1,77 @@
 import socket
 import os
-from datetime import datetime, timezone
+from utils import headers_str_to_dict, get_mime_type, http_response
 
-HOST = "127.0.0.1"
-PORT = 8080
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-path_map = {}
+class HttpServer:
+    ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+    path_map = {}
 
-def make_headers(headers_dict):
-    response_date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
-    headers_dict.setdefault("Date", response_date)
-    return "".join([f"{key}: {headers_dict[key]}\r\n" for key in headers_dict])
+    def __init__(self):
+        pass
 
-def make_http_response(headers, body, status_code):
-    start_line = f"HTTP/1.1 {status_code}"
-    headers = make_headers(headers)
-    
-    return f"{start_line}\r\n{headers}\r\n".encode("utf-8") + (body if type(body) == bytes else body.encode("utf-8"))
+    @staticmethod
+    def send(body, **options):
+        headers = options.get('headers', {})
+        headers.setdefault("Content-Type", "text/plain")
+        headers.setdefault("Content-Length", len(body))
 
-def get_mime_type(file_name):
-    type_map = {
-        "html": "text/html",
-        "png": "image/apng",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "css": "text/css",
-        "js": "text/javascript"
-    }
+        return http_response(headers, body, options.setdefault("status", 200))
 
-    file_extension = file_name.split(".")[1]
+    def send_file(self, req_path, **options):
+        file_path = os.path.join(self.ROOT_DIR, "static", req_path.lstrip("/"))
+        try:
+            with open(file_path, "rb") as file:
+                file_data = file.read()
+                mime_type = get_mime_type(file.name)
+                headers = options.get('headers', {})
+                headers.setdefault("Content-Type", mime_type)
+                headers.setdefault("Content-Length", len(file_data))
 
-    return type_map[file_extension]
+                response = http_response(headers, file_data, options.setdefault("status", 200))
+        except FileNotFoundError:
+            response = self.send("Not found", status=404)
 
-def get_request_headers(headers_string):
-    headers = headers_string.split("\r\n")  
-    headers_dict = {header.split(": ", 1)[0]: header.split(": ", 1)[1] for header in headers}
-     
-    return headers_string
+        return response
 
-def route(path, methods=["GET"]):
-    def route_decorator(route_func):
-        def route_wrapper(*args, **kwargs):
-            return route_func(*args, **kwargs)
+    def listen(self, port, host="127.0.0.1"):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            s.listen(1)
 
-        path_map.update({
-            path: {method: route_wrapper for method in methods}
-        })
-        
-        return route_wrapper
-    return route_decorator
+            print(f"Server started on: {host}:{port}\n\n\n")
 
-@route(path="/test", methods=["GET"])
-def test(*args, **kwargs):
-    return make_http_response({}, "Merge!!! URAAa", "200 OK")
+            while True:
+                conn, adr = s.accept()
+                with conn:
+                    data = conn.recv(1024)
+                    if not data:
+                        continue
 
+                    data = data.decode("utf-8")
+                    print(data)
 
+                    req_start_line = data.split("\r\n")[0].split(" ")
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST,PORT))
-    s.listen(1)
-    print(f"Server started on: {HOST}:{PORT}\n\n\n")
+                    req_method = req_start_line[0]
+                    req_path = req_start_line[1]
+                    req_headers = headers_str_to_dict(data.split("\r\n", 1)[1].split("\r\n\r\n")[0])
 
-    while True:
-        conn, adr = s.accept()
-        with conn:
-            data = conn.recv(1024)
-            if not data: 
-                continue   
-    
-            data = data.decode("utf-8")
-            print(data)
+                    if self.path_map.get(req_path, False):
+                        response = self.path_map[req_path][req_method]()
+                    else:
+                        response = self.send_file(req_path, **req_headers)
 
-            req_start_line = data.split("\r\n")[0].split(" ")
-
-            req_method = req_start_line[0]
-            req_path = req_start_line[1]
-            req_headers = get_request_headers(data.split("\r\n", 1)[1].split("\r\n\r\n")[0])            
-
-            if path_map.get(req_path, False):
-                response = path_map[req_path][req_method]()
-                conn.sendall(response)
-                continue
-
-            file_path = os.path.join(ROOT_DIR, "static", req_path.lstrip("/"))
-            
-            try:
-                with open(file_path, "rb") as file:
-                    file_data = file.read()
-                    mime_type = get_mime_type(file.name)
-                    headers = { 
-                        "Content-Type": mime_type, 
-                        "Content-Length": len(file_data)
-                    }                    
-                    response = make_http_response(headers, file_data, "200 OK")
                     conn.sendall(response)
-            except FileNotFoundError:
-                response = make_http_response({}, "Not found", "404 Not Found")
-                conn.sendall(response)
+
+    def route(self, path, methods=["GET"]):
+        def route_decorator(route_func):
+            def route_wrapper(*args, **kwargs):
+                return route_func(*args, **kwargs)
+
+            self.path_map.update({
+                path: {method: route_wrapper for method in methods}
+            })
+
+            return route_wrapper
+        return route_decorator
