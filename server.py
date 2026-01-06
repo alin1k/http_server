@@ -25,9 +25,8 @@ class HttpServer:
                 mime_type = get_mime_type(file.name)
                 headers = options.get('headers', {})
                 headers.setdefault("Content-Type", mime_type)
-                headers.setdefault("Content-Length", len(file_data))
 
-                response = http_response(headers, file_data, options.setdefault("status", 200))
+                response = self.send(file_data, headers=headers)
         except FileNotFoundError:
             response = self.send("Not found", status=404)
 
@@ -57,10 +56,14 @@ class HttpServer:
                     req_path = req_start_line[1]
                     req_headers = headers_str_to_dict(data.split("\r\n", 1)[1].split("\r\n\r\n")[0])
 
-                    if self.path_map.get(req_path, False):
-                        response = self.path_map[req_path][req_method]()
-                    else:
-                        response = self.send_file(req_path, **req_headers)
+                    try:
+                        if self.path_map.get(req_path, False):
+                            response = self.path_map[req_path][req_method]()
+                        else:
+                            response = self.send_file(req_path, **req_headers)
+                    except Exception as e:
+                        print(f"\n\nAn error occurred [{req_path}]:", e, "\n\n")
+                        response = self.send("Internal server error", status=500)
 
                     conn.sendall(response)
 
